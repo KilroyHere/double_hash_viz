@@ -1,0 +1,567 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Double Hashing vs Linear Probing — Probe</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&family=Source+Sans+3:wght@400;600;700&display=swap');
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  font-family: 'Source Sans 3', sans-serif;
+  background: #1A1A1A;
+  display: flex; justify-content: center; align-items: center;
+  min-height: 100vh; padding: 20px;
+}
+.outer {
+  width: 1100px; background: white; border-radius: 10px;
+  overflow: hidden; box-shadow: 0 20px 60px rgba(0,0,0,0.5);
+}
+.header {
+  background: #B31B1B; height: 52px;
+  display: flex; align-items: center; justify-content: space-between; padding: 0 28px;
+}
+.header h1 { color: white; font-size: 17px; font-weight: 700; }
+.header-right { display: flex; align-items: center; gap: 12px; }
+.iter-badge {
+  background: #8A1515; color: white;
+  font-family: 'JetBrains Mono', monospace; font-size: 11px; font-weight: 700;
+  padding: 4px 10px; border-radius: 4px; letter-spacing: 0.05em; min-width: 100px; text-align: center;
+}
+.header-sub { color: rgba(255,255,255,0.5); font-size: 11px; font-family: 'JetBrains Mono', monospace; }
+
+.progress-row {
+  background: #F0F0F0; padding: 8px 28px; display: flex; gap: 5px;
+}
+.prog-step { flex: 1; height: 5px; border-radius: 3px; background: #E0E0E0; transition: background 0.4s; }
+.prog-step.done    { background: #B31B1B; }
+.prog-step.current { background: #E57373; }
+
+.panels { display: grid; grid-template-columns: 1fr 1fr; }
+.panel { padding: 14px 20px 12px 20px; border-right: 1px solid #EBEBEB; }
+.panel:last-child { border-right: none; }
+
+.panel-title {
+  font-size: 11.5px; font-weight: 700; letter-spacing: 0.07em;
+  text-transform: uppercase; margin-bottom: 8px; padding: 5px 10px; border-radius: 4px;
+}
+.panel-title.bad  { background: #FFF8E1; color: #E65100; }
+.panel-title.good { background: #EBF7EC; color: #2E7D32; }
+
+.sublabel { font-size: 10.5px; color: #999; font-family: 'JetBrains Mono', monospace; margin-bottom: 8px; min-height: 15px; }
+
+.bucket-row { display: flex; gap: 3px; margin-bottom: 7px; flex-wrap: wrap; }
+.bucket {
+  width: 42px; height: 54px; border-radius: 5px;
+  border: 1.5px solid #E0E0E0; background: #F9F9F9;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  font-family: 'JetBrains Mono', monospace; font-size: 10px;
+  transition: all 0.3s ease; position: relative;
+}
+.bucket .idx { font-size: 8.5px; color: #BBBBBB; margin-bottom: 1px; }
+.bucket .val { font-size: 10.5px; font-weight: 700; color: #CCCCCC; }
+
+/* cluster = occupied by other keys, not the target */
+.bucket.cluster  { background: #FFF3E0; border-color: #FFA726; }
+.bucket.cluster .val { color: #E65100; }
+/* occupied by non-cluster unrelated keys */
+.bucket.occupied { background: #F0F0F0; border-color: #BDBDBD; }
+.bucket.occupied .val { color: #888; }
+/* empty bucket = probe terminates NOT FOUND (shouldn't happen in our scenario) */
+.bucket.empty-slot { background: #F9F9F9; border-color: #E0E0E0; }
+/* the key we're searching for lives here */
+.bucket.target-key { background: #E8EAF6; border-color: #3949AB; border-width: 2px; }
+.bucket.target-key .val { color: #283593; font-weight: 700; }
+/* currently being examined */
+.bucket.probed   { background: #FFF8E1; border-color: #FFA726; opacity: 0.75; }
+.bucket.probed .val { color: #E65100; }
+.bucket.current  { background: #E3F2FD; border-color: #1E88E5; border-width: 2.5px; transform: scale(1.08); z-index: 1; }
+.bucket.current .val { color: #1565C0; }
+/* found the match! */
+.bucket.found    { background: #EBF7EC; border-color: #43A047; border-width: 2.5px; }
+.bucket.found .val { color: #2E7D32; font-weight: 700; font-size: 9.5px; }
+.bucket.skipped  { opacity: 0.25; }
+
+.bucket .step-dot {
+  position: absolute; top: -7px; right: -7px;
+  width: 15px; height: 15px; border-radius: 50%; font-size: 8px; font-weight: 700;
+  display: flex; align-items: center; justify-content: center;
+  opacity: 0; transition: opacity 0.3s; font-family: 'JetBrains Mono', monospace; color: white;
+}
+.bucket .step-dot.show { opacity: 1; }
+.bucket .step-dot.red  { background: #B31B1B; }
+.bucket .step-dot.blue { background: #1565C0; }
+
+/* probe key pill */
+.probe-pill {
+  display: flex; align-items: center; gap: 8px;
+  margin-bottom: 8px;
+}
+.pill {
+  background: #37474F; color: white;
+  font-family: 'JetBrains Mono', monospace; font-size: 11px; font-weight: 700;
+  padding: 3px 12px; border-radius: 12px;
+}
+.pill-label { font-size: 10px; color: #999; }
+
+.seq-track {
+  display: flex; gap: 3px; align-items: center;
+  flex-wrap: wrap; min-height: 24px; margin-bottom: 7px;
+}
+.seq-item {
+  padding: 1px 6px; border-radius: 4px; font-family: 'JetBrains Mono', monospace;
+  font-size: 10.5px; font-weight: 600; border: 1.5px solid; transition: all 0.3s;
+}
+.seq-item.pending { background: #F5F5F5; border-color: #E0E0E0; color: #BDBDBD; }
+.seq-item.done    { background: #FFF8E1; border-color: #FFA726; color: #E65100; }
+.seq-item.active  { background: #B31B1B; border-color: #B31B1B; color: white; transform: scale(1.1); }
+.seq-item.found   { background: #EBF7EC; border-color: #43A047; color: #2E7D32; }
+.seq-arrow { color: #CCCCCC; font-size: 12px; }
+.seq-arrow.dh { color: #43A047; font-size: 9.5px; font-family: 'JetBrains Mono', monospace; font-weight: 600; }
+
+.info-box {
+  background: #F8F8F8; border: 1px solid #EBEBEB; border-radius: 6px;
+  padding: 9px 13px; font-family: 'JetBrains Mono', monospace;
+  font-size: 11px; line-height: 1.75; color: #333; min-height: 68px;
+}
+.hl-r { color: #B31B1B; font-weight: 700; }
+.hl-b { color: #1565C0; font-weight: 700; }
+.hl-g { color: #2E7D32; font-weight: 700; }
+.hl-o { color: #E65100; font-weight: 700; }
+.hl-i { color: #283593; font-weight: 700; }
+
+.bottom {
+  display: grid; grid-template-columns: 1fr 1fr;
+  background: #FAFAFA; border-top: 1px solid #EBEBEB; border-bottom: 1px solid #EBEBEB;
+}
+.formula-box {
+  padding: 10px 20px; font-family: 'JetBrains Mono', monospace;
+  font-size: 11px; line-height: 1.8; border-right: 1px solid #EBEBEB; color: #333;
+}
+.formula-box:last-child { border-right: none; }
+.formula-box .lbl { font-size: 9px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; color: #999; margin-bottom: 2px; }
+
+.controls {
+  background: #2A2A2A; padding: 9px 22px;
+  display: flex; align-items: center; justify-content: space-between;
+}
+.btn {
+  background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.2);
+  color: white; font-size: 12px; font-weight: 600; padding: 6px 15px;
+  border-radius: 4px; cursor: pointer; font-family: 'Source Sans 3', sans-serif; transition: background 0.2s;
+}
+.btn:hover { background: rgba(255,255,255,0.2); }
+.btn.primary { background: #B31B1B; border-color: #B31B1B; }
+.status-txt { font-family: 'JetBrains Mono', monospace; font-size: 11px; color: rgba(255,255,255,0.35); }
+</style>
+</head>
+<body>
+<div class="outer">
+
+  <div class="header">
+    <h1>Probing: Linear Probing (cluster walk) &nbsp;vs&nbsp; Double Hashing (cluster skip)</h1>
+    <div class="header-right">
+      <span class="iter-badge" id="iter-badge">QUERY 1 / 5</span>
+      <span class="header-sub">← →  ·  space</span>
+    </div>
+  </div>
+  <div class="progress-row" id="progress-row"></div>
+
+  <div class="panels">
+    <div class="panel">
+      <div class="panel-title bad">✗ Linear Probing — step = 1, walks through cluster</div>
+      <div class="probe-pill"><span class="pill" id="pill-lp"></span><span class="pill-label" id="pill-lp-label"></span></div>
+      <div class="bucket-row" id="buckets-lp"></div>
+      <div class="seq-track" id="seq-lp"></div>
+      <div class="info-box" id="info-lp"></div>
+    </div>
+    <div class="panel">
+      <div class="panel-title good">✓ Double Hashing — unique step per key, skips cluster</div>
+      <div class="probe-pill"><span class="pill" id="pill-dh"></span><span class="pill-label" id="pill-dh-label"></span></div>
+      <div class="bucket-row" id="buckets-dh"></div>
+      <div class="seq-track" id="seq-dh"></div>
+      <div class="info-box" id="info-dh"></div>
+    </div>
+  </div>
+
+  <div class="bottom">
+    <div class="formula-box">
+      <div class="lbl">Linear Probing — Probe</div>
+      h = hash1(k) mod T<br>
+      while table[h] ≠ k and table[h] ≠ EMPTY:<br>
+      &nbsp;&nbsp;h = h + <span style="color:#E65100;font-weight:700">1</span><br>
+      <span style="color:#E65100;font-size:10px">▲ step=1 → all probes pile into the same cluster</span>
+    </div>
+    <div class="formula-box">
+      <div class="lbl">Double Hashing — Probe</div>
+      h    = hash1(k) mod T<br>
+      step = hash2(k) mod (T−1) + 1<br>
+      while table[h] ≠ k and table[h] ≠ EMPTY:<br>
+      &nbsp;&nbsp;h = h + <span style="color:#2E7D32;font-weight:700">step</span><br>
+      <span style="color:#2E7D32;font-size:10px">▲ unique stride per key → jumps past clusters</span>
+    </div>
+  </div>
+
+  <div class="controls">
+    <div style="display:flex;gap:8px">
+      <button class="btn" id="btn-prev">◀ Prev</button>
+      <button class="btn primary" id="btn-play">⏸ Pause</button>
+      <button class="btn" id="btn-next">Next ▶</button>
+    </div>
+    <span class="status-txt" id="status"></span>
+    <div style="display:flex;gap:8px">
+      <button class="btn" id="btn-slow">0.5×</button>
+      <button class="btn primary" id="btn-norm">1×</button>
+      <button class="btn" id="btn-fast">2×</button>
+    </div>
+  </div>
+</div>
+
+<script>
+// T=13 (prime). Table is ALREADY BUILT — same for both LP and DH.
+// Cluster of colliding keys occupies buckets 4,5,6,7,8.
+// Keys in the table (both sides identical — same physical table contents):
+const T = 13;
+
+// The table contents are the same for both LP and DH.
+// LP and DH built with DIFFERENT hash functions, so keys land in different buckets.
+// To keep it clean: same visual table, same cluster, different probe paths.
+const TABLE = {
+  0: "k=29",
+  1: "k=17",
+  2: "k=88",
+  3: null,       // EMPTY
+  4: "k=55",     // cluster start
+  5: "k=71",
+  6: "k=42",     // ← query 1 target (LP walks here)
+  7: "k=33",
+  8: "k=13",     // cluster end
+  9: "k=61",     // ← query 2 target
+  10: null,      // EMPTY
+  11: "k=84",
+  12: "k=77",    // ← query 3 target
+};
+const CLUSTER = [4,5,6,7,8];
+const EMPTY_SLOTS = [3, 10];
+
+// 5 probe queries, showing different scenarios
+// Each: key being probed, h1 (hash1 result), lp_seq (LP probe path ending at found/empty),
+//       dh_step, dh_seq (DH probe path)
+// LP uses step=1. DH uses unique step.
+// Note: LP and DH start at SAME h1 (hash1(k) is the same function).
+// The key must exist somewhere in the table for a FOUND result.
+const QUERIES = [
+  {
+    key: "k=42", h1: 4,
+    // LP: starts at 4 (cluster), walks 4→5→6 (found k=42 at 6)
+    lp_seq: [4,5,6], lp_found: true,
+    // DH: step=5 → 4→9→(9+5=14 mod13=1)→... wait, k=42 is at bucket 6 in DH table too
+    // DH step=5: 4 → 9 (not k=42) → 9+5=14 mod13=1 (not k=42) → 1+5=6 ✓ found!
+    dh_step: 5, dh_seq: [4,9,1,6], dh_found: true,
+    note: "k=42 lives at bucket 6 — LP must crawl through cluster to get there"
+  },
+  {
+    key: "k=61", h1: 4,
+    // LP: 4→5→6→7→8→9 found
+    lp_seq: [4,5,6,7,8,9], lp_found: true,
+    // DH: step=3 → 4→7→10(empty? no, wait — k=61 is at 9 in the table)
+    // step=3: 4→7→10(empty) — but k=61 is at 9, not reachable with step=3 from 4
+    // Let's use step=5: 4→9 ✓ found immediately
+    dh_step: 5, dh_seq: [4,9], dh_found: true,
+    note: "k=61 at bucket 9 — LP walks entire cluster; DH jumps directly"
+  },
+  {
+    key: "k=77", h1: 5,
+    // LP: 5→6→7→8→9→10(empty? no)→11→12 found
+    lp_seq: [5,6,7,8,9,11,12], lp_found: true,
+    // DH: step=7 → 5→12 found
+    dh_step: 7, dh_seq: [5,12], dh_found: true,
+    note: "k=77 at bucket 12 — LP walks through cluster and beyond"
+  },
+  {
+    key: "k=29", h1: 6,
+    // LP: 6→7→8→9→10→11→12→0 found
+    lp_seq: [6,7,8,9,11,12,0], lp_found: true,
+    // DH: step=7 → 6→0 found
+    dh_step: 7, dh_seq: [6,0], dh_found: true,
+    note: "k=29 at bucket 0 — LP walks cluster tail + wrap; DH hops over"
+  },
+  {
+    key: "k=99", h1: 4,
+    // k=99 is NOT in the table. LP walks until it hits an empty bucket.
+    // LP: 4→5→6→7→8→9→10(empty) → NOT FOUND
+    lp_seq: [4,5,6,7,8,9,10], lp_found: false,
+    // DH: step=6 → 4→10(empty) → NOT FOUND
+    dh_step: 6, dh_seq: [4,10], dh_found: false,
+    note: "k=99 not in table — LP walks entire cluster before finding empty slot"
+  },
+];
+
+const TOTAL_QUERIES = QUERIES.length;
+
+function buildBuckets(prefix) {
+  const el = document.getElementById('buckets-' + prefix);
+  el.innerHTML = '';
+  for (let i = 0; i < T; i++) {
+    const b = document.createElement('div');
+    b.id = 'b-' + prefix + '-' + i;
+    const isCluster = CLUSTER.includes(i);
+    const isEmpty = TABLE[i] === null;
+    b.className = 'bucket' + (isCluster ? ' cluster' : isEmpty ? ' empty-slot' : ' occupied');
+    const valTxt = TABLE[i] ? TABLE[i].replace('k=','') : '∅';
+    b.innerHTML = `<span class="idx">${i}</span><span class="val">${valTxt}</span><span class="step-dot" id="dot-${prefix}-${i}"></span>`;
+    el.appendChild(b);
+  }
+}
+buildBuckets('lp');
+buildBuckets('dh');
+
+let qIdx = 0, step = 0, playing = true, speed = 1300, timer = null;
+
+function maxStep(qi) {
+  return Math.max(QUERIES[qi].lp_seq.length, QUERIES[qi].dh_seq.length) - 1;
+}
+
+function resetPanel(prefix) {
+  for (let i = 0; i < T; i++) {
+    const b = document.getElementById('b-' + prefix + '-' + i);
+    const dot = document.getElementById('dot-' + prefix + '-' + i);
+    const isCluster = CLUSTER.includes(i);
+    const isEmpty = TABLE[i] === null;
+    b.className = 'bucket' + (isCluster ? ' cluster' : isEmpty ? ' empty-slot' : ' occupied');
+    b.style.opacity = '';
+    dot.className = 'step-dot'; dot.textContent = '';
+    const v = b.querySelector('.val');
+    v.textContent = TABLE[i] ? TABLE[i].replace('k=','') : '∅';
+  }
+}
+
+function highlightTargetKey(prefix, qi) {
+  const q = QUERIES[qi];
+  // find which bucket holds the target key
+  for (let i = 0; i < T; i++) {
+    if (TABLE[i] === q.key) {
+      const b = document.getElementById('b-' + prefix + '-' + i);
+      if (!b.classList.contains('probed') && !b.classList.contains('current') && !b.classList.contains('found')) {
+        b.className = 'bucket target-key';
+        b.querySelector('.val').textContent = TABLE[i].replace('k=','') + ' ★';
+      }
+    }
+  }
+}
+
+function render() {
+  const q = QUERIES[qIdx];
+
+  // badges + progress
+  document.getElementById('iter-badge').textContent = `QUERY ${qIdx+1} / ${TOTAL_QUERIES}`;
+  const pr = document.getElementById('progress-row');
+  pr.innerHTML = '';
+  for (let i = 0; i < TOTAL_QUERIES; i++) {
+    const d = document.createElement('div');
+    d.className = 'prog-step' + (i < qIdx ? ' done' : i === qIdx ? ' current' : '');
+    pr.appendChild(d);
+  }
+
+  // pill labels
+  document.getElementById('pill-lp').textContent = `probe ${q.key}`;
+  document.getElementById('pill-dh').textContent = `probe ${q.key}`;
+  document.getElementById('pill-lp-label').textContent = `hash1 → bucket ${q.h1}  |  step = 1`;
+  document.getElementById('pill-dh-label').textContent = `hash1 → bucket ${q.h1}  |  step = ${q.dh_step}`;
+
+  // ── LP ──
+  resetPanel('lp');
+  highlightTargetKey('lp', qIdx);
+
+  const lpS = Math.min(step, q.lp_seq.length - 1);
+  for (let s = 0; s <= lpS; s++) {
+    const h = q.lp_seq[s];
+    const b = document.getElementById('b-lp-' + h);
+    const dot = document.getElementById('dot-lp-' + h);
+    const isLast = s === q.lp_seq.length - 1;
+    const isCur = s === step;
+
+    if (isLast && s <= step) {
+      b.className = q.lp_found ? 'bucket found' : 'bucket current';
+      b.querySelector('.val').textContent = q.lp_found ? '✓ ' + q.key.replace('k=','') : '∅ stop';
+    } else if (isCur) {
+      b.className = 'bucket current';
+    } else {
+      b.className = 'bucket probed';
+      b.querySelector('.val').textContent = TABLE[h] ? TABLE[h].replace('k=','') : '∅';
+    }
+    dot.textContent = s+1; dot.className = 'step-dot show red';
+  }
+
+  // LP seq track
+  const lpSeqEl = document.getElementById('seq-lp');
+  lpSeqEl.innerHTML = '';
+  q.lp_seq.forEach((h, s) => {
+    const item = document.createElement('span');
+    const isLast = s === q.lp_seq.length - 1;
+    item.className = 'seq-item ' + (s === step ? 'active' : s < step ? (isLast ? 'found' : 'done') : 'pending');
+    item.textContent = h;
+    lpSeqEl.appendChild(item);
+    if (s < q.lp_seq.length - 1) {
+      const a = document.createElement('span'); a.className = 'seq-arrow'; a.textContent = '→';
+      lpSeqEl.appendChild(a);
+    }
+  });
+
+  const lpInfo = document.getElementById('info-lp');
+  if (step === 0) {
+    lpInfo.innerHTML = `Probing <span class="hl-r">${q.key}</span> &nbsp;|&nbsp; hash1 → <span class="hl-r">${q.h1}</span> &nbsp;|&nbsp; step = <span class="hl-o">1</span><br>${q.note}<br>bucket ${q.h1} ≠ ${q.key} → collision, keep walking`;
+  } else if (step >= q.lp_seq.length - 1) {
+    const dest = q.lp_seq[q.lp_seq.length-1];
+    if (q.lp_found)
+      lpInfo.innerHTML = `bucket <span class="hl-g">${dest}</span> → <span class="hl-g">${q.key} FOUND ✓</span><br>Required <span class="hl-r">${q.lp_seq.length} probes</span> — walked through ${q.lp_seq.length-1} wrong buckets<br><span class="hl-o">Cluster forces every nearby probe to pay this cost</span>`;
+    else
+      lpInfo.innerHTML = `bucket <span class="hl-o">${dest}</span> is <span class="hl-o">EMPTY</span> → <span class="hl-r">NOT FOUND</span><br>Required <span class="hl-r">${q.lp_seq.length} probes</span> before terminating<br><span class="hl-o">Cluster forces a long walk even for absent keys</span>`;
+  } else {
+    const h = q.lp_seq[step];
+    const prev = q.lp_seq[step-1];
+    lpInfo.innerHTML = `h = ${prev} + <span class="hl-o">1</span> = <span class="hl-r">${h}</span> &nbsp;|&nbsp; table[${h}] = ${TABLE[h] || '∅'} ≠ ${q.key}<br>Collision → keep walking &nbsp;|&nbsp; probe ${step+1} of ${q.lp_seq.length}`;
+  }
+
+  // ── DH ──
+  resetPanel('dh');
+  highlightTargetKey('dh', qIdx);
+
+  const dhS = Math.min(step, q.dh_seq.length - 1);
+  for (let s = 0; s <= dhS; s++) {
+    const h = q.dh_seq[s];
+    const b = document.getElementById('b-dh-' + h);
+    const dot = document.getElementById('dot-dh-' + h);
+    const isLast = s === q.dh_seq.length - 1;
+    const isCur = s === step;
+
+    if (isLast && s <= step) {
+      b.className = q.dh_found ? 'bucket found' : 'bucket current';
+      b.querySelector('.val').textContent = q.dh_found ? '✓ ' + q.key.replace('k=','') : '∅ stop';
+    } else if (isCur) {
+      b.className = 'bucket current';
+    } else {
+      b.className = 'bucket probed';
+      b.querySelector('.val').textContent = TABLE[h] ? TABLE[h].replace('k=','') : '∅';
+    }
+    dot.textContent = s+1; dot.className = 'step-dot show blue';
+  }
+
+  // fade buckets between DH steps that were skipped
+  if (step >= q.dh_seq.length - 1) {
+    for (let s = 0; s < q.dh_seq.length - 1; s++) {
+      const from = q.dh_seq[s], to = q.dh_seq[s+1];
+      // fade buckets strictly between from+1 and to-1 if sequential
+      const min = Math.min(from,to)+1, max = Math.max(from,to)-1;
+      for (let i = min; i <= max; i++) {
+        const b = document.getElementById('b-dh-' + i);
+        if (b && !b.classList.contains('found') && !b.classList.contains('probed'))
+          b.classList.add('skipped');
+      }
+    }
+  }
+
+  // DH seq track
+  const dhSeqEl = document.getElementById('seq-dh');
+  dhSeqEl.innerHTML = '';
+  q.dh_seq.forEach((h, s) => {
+    const item = document.createElement('span');
+    const isLast = s === q.dh_seq.length - 1;
+    const cur = Math.min(step, q.dh_seq.length - 1);
+    item.className = 'seq-item ' + (s === cur ? (isLast ? 'found' : 'active') : s < cur ? 'found' : 'pending');
+    item.textContent = h;
+    dhSeqEl.appendChild(item);
+    if (s < q.dh_seq.length - 1) {
+      const a = document.createElement('span');
+      a.className = 'seq-arrow dh'; a.textContent = `+(${q.dh_step})→`;
+      dhSeqEl.appendChild(a);
+    }
+  });
+
+  const dhInfo = document.getElementById('info-dh');
+  const dhCur = Math.min(step, q.dh_seq.length - 1);
+  if (step === 0) {
+    dhInfo.innerHTML = `Probing <span class="hl-r">${q.key}</span> &nbsp;|&nbsp; hash1 → <span class="hl-r">${q.h1}</span> &nbsp;|&nbsp; step = <span class="hl-b">${q.dh_step}</span><br>${q.note}<br>bucket ${q.h1} ≠ ${q.key} → collision, jump by step`;
+  } else if (dhCur >= q.dh_seq.length - 1) {
+    const dest = q.dh_seq[q.dh_seq.length-1];
+    if (q.dh_found)
+      dhInfo.innerHTML = `bucket <span class="hl-g">${dest}</span> → <span class="hl-g">${q.key} FOUND ✓</span><br><span class="hl-g">${q.dh_seq.length} probes</span> — saved <span class="hl-g">${q.lp_seq.length - q.dh_seq.length}</span> probe(s) vs LP<br><span class="hl-g">Unique stride disperses probe away from the cluster</span>`;
+    else
+      dhInfo.innerHTML = `bucket <span class="hl-o">${dest}</span> is <span class="hl-o">EMPTY</span> → <span class="hl-r">NOT FOUND</span><br><span class="hl-g">${q.dh_seq.length} probes</span> to terminate vs LP's ${q.lp_seq.length}<br><span class="hl-g">DH jumps past cluster to reach empty slot quickly</span>`;
+  } else {
+    const h = q.dh_seq[dhCur];
+    const prev = q.dh_seq[dhCur-1];
+    const raw = prev + q.dh_step;
+    dhInfo.innerHTML = `h = ${prev} + <span class="hl-b">${q.dh_step}</span> = ${raw}${raw >= T ? ` mod 13 = <span class="hl-b">${h}</span>` : ` = <span class="hl-b">${h}</span>`} &nbsp;|&nbsp; table[${h}] = ${TABLE[h] || '∅'} ≠ ${q.key}<br>Collision → jump again &nbsp;|&nbsp; probe ${dhCur+1} of ${q.dh_seq.length}`;
+  }
+
+  document.getElementById('status').textContent =
+    `query ${qIdx+1}/${TOTAL_QUERIES}  ·  probe step ${Math.min(step+1, q.lp_seq.length)} / ${q.lp_seq.length}`;
+}
+
+function advance() {
+  if (step < maxStep(qIdx)) {
+    step++;
+  } else if (qIdx < TOTAL_QUERIES - 1) {
+    // clear skips before switching
+    for (let i = 0; i < T; i++) document.getElementById('b-dh-'+i)?.classList.remove('skipped');
+    qIdx++;
+    step = 0;
+  }
+  render();
+}
+function retreat() {
+  for (let i = 0; i < T; i++) document.getElementById('b-dh-'+i)?.classList.remove('skipped');
+  if (step > 0) {
+    step--;
+  } else if (qIdx > 0) {
+    qIdx--;
+    step = maxStep(qIdx);
+  }
+  render();
+}
+
+function startTimer() {
+  clearInterval(timer);
+  timer = setInterval(() => {
+    const atEnd = step >= maxStep(qIdx) && qIdx >= TOTAL_QUERIES - 1;
+    if (atEnd) {
+      clearInterval(timer);
+      setTimeout(() => {
+        for (let i = 0; i < T; i++) document.getElementById('b-dh-'+i)?.classList.remove('skipped');
+        qIdx = 0; step = 0; render();
+        if (playing) startTimer();
+      }, 2600);
+    } else { advance(); }
+  }, speed);
+}
+function stopTimer() { clearInterval(timer); timer = null; }
+
+document.getElementById('btn-play').addEventListener('click', () => {
+  playing = !playing;
+  document.getElementById('btn-play').textContent = playing ? '⏸ Pause' : '▶ Play';
+  playing ? startTimer() : stopTimer();
+});
+document.getElementById('btn-next').addEventListener('click', () => { advance(); if(playing) startTimer(); });
+document.getElementById('btn-prev').addEventListener('click', () => { retreat(); if(playing) startTimer(); });
+
+function setSpeed(s, id) {
+  speed = s;
+  ['btn-slow','btn-norm','btn-fast'].forEach(b => document.getElementById(b).classList.remove('primary'));
+  document.getElementById(id).classList.add('primary');
+  if (playing) startTimer();
+}
+document.getElementById('btn-slow').addEventListener('click', () => setSpeed(2600,'btn-slow'));
+document.getElementById('btn-norm').addEventListener('click', () => setSpeed(1300,'btn-norm'));
+document.getElementById('btn-fast').addEventListener('click', () => setSpeed(650,'btn-fast'));
+
+document.addEventListener('keydown', e => {
+  if (e.key==='ArrowRight') { advance(); if(playing) startTimer(); }
+  if (e.key==='ArrowLeft')  { retreat(); if(playing) startTimer(); }
+  if (e.key===' ')          { e.preventDefault(); document.getElementById('btn-play').click(); }
+});
+
+render();
+startTimer();
+</script>
+</body>
+</html>
